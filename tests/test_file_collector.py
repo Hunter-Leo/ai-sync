@@ -1,0 +1,198 @@
+"""Unit tests for ai_sync.file_collector."""
+
+import os
+from pathlib import Path
+from unittest.mock import patch
+
+import pytest
+
+from ai_sync.adapters.claude_code import ClaudeCodeAdapter
+from ai_sync.adapters.shared_skills import SharedSkillsAdapter
+from ai_sync.file_collector import FileCollector
+from ai_sync.models import Platform, SyncItem
+from ai_sync.path_mapper import PathMapper
+
+
+@pytest.fixture
+def mapper(tmp_path: Path) -> PathMapper:
+    return PathMapper(platform=Platform.DARWIN, home=tmp_path)
+
+
+@pytest.fixture
+def collector(mapper: PathMapper) -> FileCollector:
+    return FileCollector(mapper=mapper)
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def make_claude_dir(base: Path) -> Path:
+    """Create a minimal ~/.claude structure under base."""
+    claude = base / ".claude"
+    claude.mkdir()
+    (claude / "settings.json").write_text('{"model": "opus"}', encoding="utf-8")
+    (claude / "CLAUDE.md").write_text("# Global", encoding="utf-8")
+    hooks = claude / "hooks"
+    hooks.mkdir()
+    (hooks / "pre.mjs").write_text("// hook", encoding="utf-8")
+    skills = claude / "skills"
+    skills.mkdir()
+    (skills / "foo.md").write_text("# Skill", encoding="utf-8")
+    return claude
+
+
+# ---------------------------------------------------------------------------
+# Basic collection
+# ---------------------------------------------------------------------------
+
+class TestCollectFiles:
+    def test_collects_text_files(self, tmp_path: Path, collector: FileCollector) -> None:
+        make_claude_dir(tmp_path)
+        adapter = ClaudeCodeAdapter(home=tmp_path)
+        files = collector.collect(adapter)
+        repo_paths = {f.repo_path for f in files}
+        assert "claude-code/settings.json" in repo_paths
+        assert "claude-code/CLAUDE.md" in repo_paths
+
+    def test_collects_directory_recursively(self, tmp_path: Path, collector: FileCollector) -> None:
+        make_claude_dir(tmp_path)
+        adapter = ClaudeCodeAdapter(home=tmp_path)
+        files = collector.collect(adapter)
+        repo_paths = {f.repo_path for f in files}
+        assert "claude-code/hooks/pre.mjs" in repo_paths
+        assert "claude-code/skills/foo.md" in repo_paths
+
+    def test_path_abstraction_applied(self, tmp_path: Path, mapper: PathMapper) -> None:
+        claude = make_claude_dir(tmp_path)
+        # Write a settings.json that contains the real home path.
+        (claude / "settings.json").write_text(
+            f'{{"hooks": "{tmp_path}/.claude/hooks"}}', encoding="utf-8"
+        )
+        collector = FileCollector(mapper=mapper)
+        adapter = ClaudeCodeAdapter(home=tmp_path)
+        files = collector.collect(adapter)
+        settings = next(f for f in files if f.repo_path == "claude-code/settings.json")
+        content = settings.content.decode("utf-8")
+        assert "{{CLAUDE_HOME}}" in content
+        assert str(tmp_path) not in content
+
+    def test_binary_file_not_abstracted(self, tmp_path: Path, collector: FileCollector) -> None:
+        claude = tmp_path / ".claude"
+        claude.mkdir()
+        (claude / "settings.json").write_text("{}", encoding="utf-8")
+        (claude / "CLAUDE.md").write_text("# x", encoding="utf-8")
+        hooks = claude / "hooks"
+        hooks.mkdir()
+        skills = claude / "skills"
+        skills.mkdir()
+        binary = skills / "icon.png"
+        binary.write_bytes(b"\x89PNG\r\n\x1a\n")
+        adapter = ClaudeCodeAdapter(home=tmp_path)
+        files = collector.collect(adapter)
+        png = next(f for f in files if f.repo_path.endswith("icon.png"))
+        assert png.is_binary is True
+        assert png.content == b"\x89PNG\r\n\x1a\n"
+
+
+# ---------------------------------------------------------------------------
+# Optional items
+# ---------------------------------------------------------------------------
+
+class TestOptionalItems:
+    def test_optional_missing_skipped(self, tmp_path: Path, collector: FileCollector) -> None:
+        """SharedSkillsAdapter items are optional — missing dirs should be skipped."""
+        adapter = SharedSkillsAdapter(home=tmp_path)
+        files = collector.collect(adapter)
+        assert files == []
+
+    def test_optional_present_collected(self, tmp_path: Path, collector: FileCollector) -> None:
+        skills = tmp_path / ".skills"
+        skills.mkdir()
+        (skills / "my_skill.md").write_text("# Skill", encoding="utf-8")
+        adapter = SharedSkillsAdapter(home=tmp_path)
+        files = collector.collect(adapter)
+        repo_paths = {f.repo_path for f in files}
+        assert "shared/skills/my_skill.md" in repo_paths
+
+
+# ---------------------------------------------------------------------------
+# Symlink handling
+# ---------------------------------------------------------------------------
+
+class TestSymlinks:
+    def test_symlink_resolved_to_content(self, tmp_path: Path, collector: FileCollector) -> None:
+        real = tmp_path / "real_settings.json"
+        real.write_text('{"model": "opus"}', encoding="utf-8")
+        claude = tmp_path / ".claude"
+        claude.mkdir()
+        link = claude / "settings.json"
+        link.symlink_to(real)
+        (claude / "CLAUDE.md").write_text("# x", encoding="utf-8")
+        hooks = claude / "hooks"
+        hooks.mkdir()
+        skills = claude / "skills"
+        skills.mkdir()
+        adapter = ClaudeCodeAdapter(home=tmp_path)
+        files = collector.collect(adapter)
+        settings = next(f for f in files if f.repo_path == "claude-code/settings.json")
+        assert b'"model"' in settings.content
+
+    def test_dangling_symlink_skipped_with_warning(
+        self, tmp_path: Path, collector: FileCollector, capsys
+    ) -> None:
+        claude = tmp_path / ".claude"
+        claude.mkdir()
+        link = claude / "settings.json"
+        link.symlink_to(tmp_path / "nonexistent.json")
+        (claude / "CLAUDE.md").write_text("# x", encoding="utf-8")
+        hooks = claude / "hooks"
+        hooks.mkdir()
+        skills = claude / "skills"
+        skills.mkdir()
+        adapter = ClaudeCodeAdapter(home=tmp_path)
+        # Should not raise; dangling link is skipped.
+        files = collector.collect(adapter)
+        repo_paths = {f.repo_path for f in files}
+        assert "claude-code/settings.json" not in repo_paths
+
+    def test_directory_symlink_content_collected(self, tmp_path: Path, collector: FileCollector) -> None:
+        real_dir = tmp_path / "real_hooks"
+        real_dir.mkdir()
+        (real_dir / "pre.mjs").write_text("// hook", encoding="utf-8")
+        claude = tmp_path / ".claude"
+        claude.mkdir()
+        (claude / "settings.json").write_text("{}", encoding="utf-8")
+        (claude / "CLAUDE.md").write_text("# x", encoding="utf-8")
+        link = claude / "hooks"
+        link.symlink_to(real_dir)
+        skills = claude / "skills"
+        skills.mkdir()
+        adapter = ClaudeCodeAdapter(home=tmp_path)
+        files = collector.collect(adapter)
+        repo_paths = {f.repo_path for f in files}
+        assert "claude-code/hooks/pre.mjs" in repo_paths
+
+
+# ---------------------------------------------------------------------------
+# Exclude patterns
+# ---------------------------------------------------------------------------
+
+class TestExcludePatterns:
+    def test_excluded_dir_skipped(self, tmp_path: Path, collector: FileCollector) -> None:
+        claude = make_claude_dir(tmp_path)
+        cache = claude / "cache"
+        cache.mkdir()
+        (cache / "cached.json").write_text("{}", encoding="utf-8")
+        adapter = ClaudeCodeAdapter(home=tmp_path)
+        files = collector.collect(adapter)
+        repo_paths = {f.repo_path for f in files}
+        assert not any("cache" in p for p in repo_paths)
+
+    def test_excluded_file_skipped(self, tmp_path: Path, collector: FileCollector) -> None:
+        claude = make_claude_dir(tmp_path)
+        (claude / "history.jsonl").write_text("{}", encoding="utf-8")
+        adapter = ClaudeCodeAdapter(home=tmp_path)
+        files = collector.collect(adapter)
+        repo_paths = {f.repo_path for f in files}
+        assert not any("history.jsonl" in p for p in repo_paths)
