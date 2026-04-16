@@ -21,9 +21,9 @@ so that ~/.claude/settings.json becomes {{CLAUDE_HOME}}/settings.json, not
 {{HOME}}/.claude/settings.json.
 """
 
-from __future__ import annotations
 
-from pathlib import Path, PurePosixPath, PureWindowsPath
+
+from pathlib import Path
 
 from ai_sync.models import Platform
 
