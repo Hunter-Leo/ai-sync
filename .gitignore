@@ -33,5 +33,8 @@ htmlcov/
 *.swo
 .DS_Store
 
+# oh-my-claudecode state
+.omc/
+
 # ai-sync local state (never sync these)
 ~/.config/ai-sync/
