@@ -65,3 +65,14 @@ class TestLoad:
         s = ConfigStore(config_path=p)
         with pytest.raises(ValidationError):
             s.load()
+
+
+class TestFilePermissions:
+    def test_config_file_is_owner_readable_only(self, store: ConfigStore, tmp_path: Path) -> None:
+        import platform
+        import stat
+        if platform.system() == "Windows":
+            pytest.skip("chmod 0o600 not enforced on Windows")
+        store.save(AppConfig(github_token="tok", repo_url="https://github.com/u/r.git"))
+        mode = stat.S_IMODE((tmp_path / "config.json").stat().st_mode)
+        assert mode == 0o600, f"Expected 0o600, got {oct(mode)}"

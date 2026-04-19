@@ -5,9 +5,10 @@ the GitHub token and remote repository URL. This module is the single
 point of access for that file.
 """
 
-from __future__ import annotations
+
 
 import json
+import os
 from pathlib import Path
 
 from ai_sync.models import AppConfig, ConfigNotFoundError
@@ -76,3 +77,4 @@ class ConfigStore:
             json.dumps(config.model_dump(), indent=2, ensure_ascii=False),
             encoding="utf-8",
         )
+        os.chmod(self._path, 0o600)
