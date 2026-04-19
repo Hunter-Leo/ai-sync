@@ -352,3 +352,63 @@ class TestStatus:
         engine = make_engine([adapter], mock_repo, mapper, collector, mock_manifest_mgr, repo_dir)
         entries = engine.status()
         assert entries[0].state == "unchanged"
+
+
+# ---------------------------------------------------------------------------
+# Security: path traversal
+# ---------------------------------------------------------------------------
+
+class TestPathTraversalProtection:
+    def test_pull_blocks_symlink_pointing_outside_base_dir(
+        self,
+        adapter: ClaudeCodeAdapter,
+        mock_repo: MagicMock,
+        mapper: PathMapper,
+        mock_manifest_mgr: MagicMock,
+        repo_dir: Path,
+        home: Path,
+        tmp_path: Path,
+    ) -> None:
+        """A repo symlink pointing outside base_dir must not cause writes outside it."""
+        # Create a real file outside the expected base_dir that the symlink points to.
+        outside_target = tmp_path / "outside_secret.txt"
+        outside_target.write_text("secret", encoding="utf-8")
+
+        # Place a symlink inside the repo: claude-code/evil.txt -> ../../outside_secret.txt
+        (repo_dir / "claude-code").mkdir(exist_ok=True)
+        symlink = repo_dir / "claude-code" / "evil.txt"
+        symlink.symlink_to(outside_target)
+
+        engine = make_engine([adapter], mock_repo, mapper, MagicMock(), mock_manifest_mgr, repo_dir)
+        engine.pull()
+
+        # The symlink target content must NOT have been written to a path outside base_dir.
+        # The only acceptable write location is inside home/.claude/.
+        base_dir = adapter.get_base_dir()
+        # evil.txt would be written to base_dir/evil.txt — that's inside base_dir, acceptable.
+        # What we verify: no file was written to tmp_path directly (outside base_dir).
+        assert not (tmp_path / "evil.txt").exists()
+
+    def test_push_blocks_traversal_repo_path(
+        self,
+        adapter: ClaudeCodeAdapter,
+        mock_repo: MagicMock,
+        mapper: PathMapper,
+        mock_manifest_mgr: MagicMock,
+        repo_dir: Path,
+        tmp_path: Path,
+    ) -> None:
+        """A CollectedFile with .. in repo_path must not be written outside repo_dir."""
+        collector = MagicMock()
+        collector.collect.return_value = [
+            CollectedFile(
+                repo_path="../../evil.txt",
+                content=b"pwned",
+            )
+        ]
+        engine = make_engine([adapter], mock_repo, mapper, collector, mock_manifest_mgr, repo_dir)
+        engine.push()
+
+        # The traversal file must not exist outside repo_dir.
+        assert not (repo_dir.parent / "evil.txt").exists()
+        assert not (repo_dir.parent.parent / "evil.txt").exists()

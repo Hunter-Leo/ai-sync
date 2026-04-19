@@ -42,6 +42,10 @@ from ai_sync.models import (
 )
 from ai_sync.path_mapper import PathMapper
 
+from rich.console import Console
+
+_console = Console(stderr=True)
+
 
 class SyncEngine:
     """Orchestrates push, pull, and status for all registered tool adapters.
@@ -101,7 +105,12 @@ class SyncEngine:
         for adapter in self._adapters:
             files = self._collector.collect(adapter)
             for cf in files:
-                dest = self._repo_dir / cf.repo_path
+                dest = (self._repo_dir / cf.repo_path).resolve()
+                if not dest.is_relative_to(self._repo_dir.resolve()):
+                    _console.print(
+                        f"[red]Security:[/red] push path traversal blocked: {cf.repo_path}"
+                    )
+                    continue
                 dest.parent.mkdir(parents=True, exist_ok=True)
                 dest.write_bytes(cf.content)
                 file_count += 1
@@ -151,7 +160,13 @@ class SyncEngine:
                 continue
 
             rest = Path(*parts[1:]) if len(parts) > 1 else Path()
-            local_path = adapter.get_base_dir() / rest
+            local_path = (adapter.get_base_dir() / rest).resolve()
+            base_dir = adapter.get_base_dir().resolve()
+            if not local_path.is_relative_to(base_dir):
+                _console.print(
+                    f"[red]Security:[/red] pull path traversal blocked: {rel.as_posix()}"
+                )
+                continue
             local_path.parent.mkdir(parents=True, exist_ok=True)
 
             raw = file_path.read_bytes()
