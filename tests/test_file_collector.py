@@ -196,3 +196,48 @@ class TestExcludePatterns:
         files = collector.collect(adapter)
         repo_paths = {f.repo_path for f in files}
         assert not any("history.jsonl" in p for p in repo_paths)
+
+
+# ---------------------------------------------------------------------------
+# Path concatenation robustness (F-004)
+# ---------------------------------------------------------------------------
+
+class TestPathConcatenation:
+    def test_repo_path_correct_with_trailing_slash(self, tmp_path: Path, collector: FileCollector) -> None:
+        """SyncItem.repo_path with trailing slash must produce correct repo_path."""
+        make_claude_dir(tmp_path)
+        adapter = ClaudeCodeAdapter(home=tmp_path)
+        files = collector.collect(adapter)
+        repo_paths = {f.repo_path for f in files}
+        # hooks/ has trailing slash — must produce "claude-code/hooks/pre.mjs", not "claude-code/hookspre.mjs"
+        assert "claude-code/hooks/pre.mjs" in repo_paths
+        assert not any("hookspre" in p for p in repo_paths)
+
+    def test_repo_path_correct_without_trailing_slash(self, tmp_path: Path, mapper: PathMapper) -> None:
+        """SyncItem.repo_path without trailing slash must still produce correct repo_path."""
+        from ai_sync.adapters.base import ToolAdapter
+        from ai_sync.models import SyncItem
+
+        class _TestAdapter(ToolAdapter):
+            @property
+            def tool_id(self) -> str:
+                return "test-tool"
+
+            def get_base_dir(self) -> Path:
+                return tmp_path / ".test"
+
+            def get_sync_items(self) -> list[SyncItem]:
+                base = self.get_base_dir()
+                base.mkdir(exist_ok=True)
+                sub = base / "sub"
+                sub.mkdir(exist_ok=True)
+                (sub / "file.json").write_text("{}", encoding="utf-8")
+                # repo_path WITHOUT trailing slash
+                return [SyncItem(local_path=sub, repo_path="sub", is_dir=True)]
+
+        collector = FileCollector(mapper=mapper)
+        files = collector.collect(_TestAdapter())
+        repo_paths = {f.repo_path for f in files}
+        # Must be "test-tool/sub/file.json", not "test-tool/subfile.json"
+        assert "test-tool/sub/file.json" in repo_paths
+        assert not any("subfile" in p for p in repo_paths)

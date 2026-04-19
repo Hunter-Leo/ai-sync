@@ -122,3 +122,16 @@ class TestIsTextFile:
         f.write_bytes(b"")
         mapper = PathMapper(Platform.DARWIN, tmp_path)
         assert mapper.is_text_file(f) is True
+
+    def test_file_with_null_byte_is_binary(self, tmp_path: Path) -> None:
+        """A file containing a null byte must be treated as binary even if otherwise valid UTF-8."""
+        f = tmp_path / "tricky.bin"
+        f.write_bytes(b"looks like text\x00but has null byte")
+        mapper = PathMapper(Platform.DARWIN, tmp_path)
+        assert mapper.is_text_file(f) is False
+
+    def test_utf8_without_null_is_text(self, tmp_path: Path) -> None:
+        f = tmp_path / "unicode.md"
+        f.write_text("# 你好世界\nsome content", encoding="utf-8")
+        mapper = PathMapper(Platform.DARWIN, tmp_path)
+        assert mapper.is_text_file(f) is True

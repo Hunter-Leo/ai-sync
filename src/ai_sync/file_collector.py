@@ -147,7 +147,7 @@ class FileCollector:
             if resolved_entry is None:
                 continue
 
-            repo_path = f"{tool_prefix}/{repo_dir}{rel.as_posix()}"
+            repo_path = (Path(tool_prefix) / repo_dir / rel).as_posix()
             cf = self._collect_file(resolved_entry, repo_path)
             if cf is not None:
                 results.append(cf)

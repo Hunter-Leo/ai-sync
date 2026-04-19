@@ -123,6 +123,8 @@ class PathMapper:
         try:
             with path.open("rb") as fh:
                 chunk = fh.read(_TEXT_PROBE_BYTES)
+            if b"\x00" in chunk:
+                return False
             chunk.decode("utf-8")
             return True
         except (UnicodeDecodeError, OSError):
