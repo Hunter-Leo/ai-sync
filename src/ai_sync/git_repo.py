@@ -142,6 +142,92 @@ class GitRepo:
 
         return sorted(changed)
 
+    def checkout_or_create_branch(self, name: str) -> None:
+        """Switch to a branch, creating it if it does not exist.
+
+        Args:
+            name: Branch name (e.g. "backup/host-darwin").
+
+        Raises:
+            RepoNotInitializedError: If the repository has not been cloned.
+            GitOperationError: If the git operation fails.
+        """
+        repo = self._get_repo()
+        try:
+            if name in [h.name for h in repo.heads]:
+                repo.heads[name].checkout()
+            else:
+                repo.create_head(name).checkout()
+        except GitCommandError as exc:
+            raise GitOperationError(
+                f"Failed to checkout/create branch {name}: {exc}", original=exc
+            ) from exc
+
+    def commit_all(self, message: str) -> bool:
+        """Stage all changes and create a commit.
+
+        Args:
+            message: Commit message.
+
+        Returns:
+            True if a commit was created, False if there was nothing to commit.
+
+        Raises:
+            RepoNotInitializedError: If the repository has not been cloned.
+            GitOperationError: If the commit fails.
+        """
+        repo = self._get_repo()
+        try:
+            repo.git.add(A=True)
+            if not repo.is_dirty(index=True, untracked_files=True):
+                return False
+            repo.index.commit(message)
+            return True
+        except GitCommandError as exc:
+            raise GitOperationError(
+                f"Failed to commit: {exc}", original=exc
+            ) from exc
+
+    def push_branch(self, name: str) -> None:
+        """Push a branch to the remote origin.
+
+        In local mode (remote_url is None), this method is a no-op.
+
+        Args:
+            name: Branch name to push.
+
+        Raises:
+            RepoNotInitializedError: If the repository has not been cloned.
+            GitOperationError: If the push fails.
+        """
+        if self._remote_url is None:
+            return
+        repo = self._get_repo()
+        try:
+            repo.remotes.origin.push(refspec=f"{name}:{name}")
+        except GitCommandError as exc:
+            raise GitOperationError(
+                f"Failed to push branch {name}: {exc}", original=exc
+            ) from exc
+
+    def checkout_branch(self, name: str) -> None:
+        """Switch to an existing branch.
+
+        Args:
+            name: Branch name to switch to.
+
+        Raises:
+            RepoNotInitializedError: If the repository has not been cloned.
+            GitOperationError: If the branch does not exist or checkout fails.
+        """
+        repo = self._get_repo()
+        try:
+            repo.heads[name].checkout()
+        except (GitCommandError, IndexError) as exc:
+            raise GitOperationError(
+                f"Failed to checkout branch {name}: {exc}", original=exc
+            ) from exc
+
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------

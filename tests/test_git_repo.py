@@ -194,3 +194,104 @@ class TestLocalMode:
         gr = GitRepo(repo_dir=local_repo, remote_url=None)
         gr.pull()
         assert (local_repo / "extra.txt").exists()
+
+
+class TestBranchManagement:
+    """Tests for GitRepo branch management methods."""
+
+    @pytest.fixture
+    def cloned_repo(self, tmp_path: Path, seeded_remote: Path) -> tuple[Path, Path]:
+        """Return (repo_dir, remote_path) with git user configured."""
+        repo_dir = tmp_path / "repo"
+        gr = GitRepo(repo_dir=repo_dir, remote_url=str(seeded_remote))
+        gr.clone()
+        repo = git.Repo(repo_dir)
+        repo.config_writer().set_value("user", "name", "Test").release()
+        repo.config_writer().set_value("user", "email", "test@test.com").release()
+        return repo_dir, seeded_remote
+
+    def test_checkout_or_create_branch_creates_new(
+        self, cloned_repo: tuple[Path, Path]
+    ) -> None:
+        repo_dir, _ = cloned_repo
+        gr = GitRepo(repo_dir=repo_dir, remote_url=None)
+        gr.checkout_or_create_branch("backup/test-darwin")
+        assert git.Repo(repo_dir).active_branch.name == "backup/test-darwin"
+
+    def test_checkout_or_create_branch_switches_existing(
+        self, cloned_repo: tuple[Path, Path]
+    ) -> None:
+        repo_dir, _ = cloned_repo
+        gr = GitRepo(repo_dir=repo_dir, remote_url=None)
+        gr.checkout_or_create_branch("backup/test-darwin")
+        gr.checkout_branch("main")
+        gr.checkout_or_create_branch("backup/test-darwin")
+        assert git.Repo(repo_dir).active_branch.name == "backup/test-darwin"
+
+    def test_commit_all_returns_true_when_changes(
+        self, cloned_repo: tuple[Path, Path]
+    ) -> None:
+        repo_dir, _ = cloned_repo
+        gr = GitRepo(repo_dir=repo_dir, remote_url=None)
+        (repo_dir / "new.txt").write_text("hello", encoding="utf-8")
+        assert gr.commit_all("add new.txt") is True
+
+    def test_commit_all_returns_false_when_no_changes(
+        self, cloned_repo: tuple[Path, Path]
+    ) -> None:
+        repo_dir, _ = cloned_repo
+        gr = GitRepo(repo_dir=repo_dir, remote_url=None)
+        assert gr.commit_all("nothing") is False
+
+    def test_push_branch_skips_in_local_mode(
+        self, cloned_repo: tuple[Path, Path]
+    ) -> None:
+        repo_dir, _ = cloned_repo
+        gr = GitRepo(repo_dir=repo_dir, remote_url=None)
+        gr.checkout_or_create_branch("backup/test-darwin")
+        (repo_dir / "snap.txt").write_text("snap", encoding="utf-8")
+        gr.commit_all("snapshot")
+        gr.push_branch("backup/test-darwin")  # must not raise
+
+    def test_push_branch_remote_mode(
+        self, cloned_repo: tuple[Path, Path]
+    ) -> None:
+        repo_dir, remote_path = cloned_repo
+        gr = GitRepo(repo_dir=repo_dir, remote_url=str(remote_path))
+        gr.checkout_or_create_branch("backup/test-darwin")
+        (repo_dir / "snap.txt").write_text("snap", encoding="utf-8")
+        gr.commit_all("snapshot")
+        gr.push_branch("backup/test-darwin")
+        remote = git.Repo(remote_path)
+        assert "backup/test-darwin" in [r.name for r in remote.references]
+
+    def test_checkout_branch_switches_to_existing(
+        self, cloned_repo: tuple[Path, Path]
+    ) -> None:
+        repo_dir, _ = cloned_repo
+        gr = GitRepo(repo_dir=repo_dir, remote_url=None)
+        gr.checkout_or_create_branch("backup/test-darwin")
+        gr.checkout_branch("main")
+        assert git.Repo(repo_dir).active_branch.name == "main"
+
+    def test_checkout_branch_raises_for_nonexistent(
+        self, cloned_repo: tuple[Path, Path]
+    ) -> None:
+        repo_dir, _ = cloned_repo
+        gr = GitRepo(repo_dir=repo_dir, remote_url=None)
+        with pytest.raises(GitOperationError):
+            gr.checkout_branch("nonexistent-branch")
+
+    def test_branch_methods_raise_when_not_cloned(self, tmp_path: Path) -> None:
+        gr = GitRepo(repo_dir=tmp_path / "norepo", remote_url=None)
+        with pytest.raises(RepoNotInitializedError):
+            gr.checkout_or_create_branch("backup/x")
+        with pytest.raises(RepoNotInitializedError):
+            gr.commit_all("msg")
+        with pytest.raises(RepoNotInitializedError):
+            gr.checkout_branch("main")
+
+    def test_push_branch_noop_when_local_mode_and_not_cloned(self, tmp_path: Path) -> None:
+        # push_branch is a no-op in local mode regardless of clone state.
+        gr = GitRepo(repo_dir=tmp_path / "norepo", remote_url=None)
+        gr.push_branch("backup/x")  # must not raise
