@@ -26,6 +26,7 @@ Data flow — pull:
 
 import hashlib
 import platform as _platform_module
+import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -103,6 +104,11 @@ class SyncEngine:
         tool_ids: list[str] = []
 
         for adapter in self._adapters:
+            tool_dir = self._repo_dir / adapter.tool_id
+            if tool_dir.exists():
+                shutil.rmtree(tool_dir)
+            tool_dir.mkdir(parents=True, exist_ok=True)
+
             files = self._collector.collect(adapter)
             for cf in files:
                 dest = (self._repo_dir / cf.repo_path).resolve()

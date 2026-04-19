@@ -174,6 +174,71 @@ class TestPush:
         assert (repo_dir / "claude-code" / "settings.json").is_file()
         assert (repo_dir / "gemini" / "settings.json").is_file()
 
+    def test_push_clears_tool_dir_before_writing(
+        self,
+        adapter: ClaudeCodeAdapter,
+        mock_repo: MagicMock,
+        mapper: PathMapper,
+        mock_manifest_mgr: MagicMock,
+        repo_dir: Path,
+    ) -> None:
+        # Pre-populate repo with a stale file that is no longer in local config.
+        stale = repo_dir / "claude-code" / "stale.json"
+        stale.parent.mkdir(parents=True, exist_ok=True)
+        stale.write_text("{}", encoding="utf-8")
+
+        collector = MagicMock()
+        collector.collect.return_value = [
+            CollectedFile(repo_path="claude-code/settings.json", content=b'{"model":"opus"}')
+        ]
+        engine = make_engine([adapter], mock_repo, mapper, collector, mock_manifest_mgr, repo_dir)
+        engine.push()
+
+        assert not stale.exists(), "stale file should be removed by full-mirror push"
+        assert (repo_dir / "claude-code" / "settings.json").is_file()
+
+    def test_push_does_not_clear_other_tool_dirs(
+        self,
+        home: Path,
+        mock_repo: MagicMock,
+        mapper: PathMapper,
+        mock_manifest_mgr: MagicMock,
+        repo_dir: Path,
+    ) -> None:
+        # gemini dir should be untouched when only claude-code adapter is used.
+        gemini_file = repo_dir / "gemini" / "settings.json"
+        gemini_file.parent.mkdir(parents=True, exist_ok=True)
+        gemini_file.write_text("{}", encoding="utf-8")
+
+        adapter = ClaudeCodeAdapter(home=home)
+        collector = MagicMock()
+        collector.collect.return_value = [
+            CollectedFile(repo_path="claude-code/settings.json", content=b"{}")
+        ]
+        engine = make_engine([adapter], mock_repo, mapper, collector, mock_manifest_mgr, repo_dir)
+        engine.push()
+
+        assert gemini_file.exists(), "other tool dirs must not be touched"
+
+    def test_push_manifest_not_cleared(
+        self,
+        adapter: ClaudeCodeAdapter,
+        mock_repo: MagicMock,
+        mapper: PathMapper,
+        mock_manifest_mgr: MagicMock,
+        repo_dir: Path,
+    ) -> None:
+        # _manifest.json lives at repo root, not inside a tool dir — must survive push.
+        manifest_file = repo_dir / "_manifest.json"
+        manifest_file.write_text("{}", encoding="utf-8")
+
+        collector = MagicMock()
+        collector.collect.return_value = []
+        engine = make_engine([adapter], mock_repo, mapper, collector, mock_manifest_mgr, repo_dir)
+        engine.push()
+
+        assert manifest_file.exists(), "_manifest.json must not be deleted by push"
+
 
 # ---------------------------------------------------------------------------
 # pull()
