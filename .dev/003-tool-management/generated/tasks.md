@@ -5,22 +5,22 @@
 | ID    | 任务名称                                              | 状态        | 备注 |
 |-------|-------------------------------------------------------|-------------|------|
 | T-001 | models.py — 新增 managed_tools 字段                   | done        |      |
-| T-002 | 测试 managed_tools 数据模型                           | in-progress |      |
-| T-003 | git_repo.py — 新增分支管理方法                        | not-started |      |
-| T-004 | 测试 GitRepo 分支管理方法                             | not-started |      |
-| T-005 | sync_engine.py — 修复 push 完整镜像                   | not-started |      |
-| T-006 | 测试 push 完整镜像语义                                | not-started |      |
-| T-007 | cli.py — 实现 _discover_tools() + _backup_branch_name() | not-started | |
-| T-008 | cli.py — 实现 _backup_to_branch()                     | not-started |      |
-| T-009 | cli.py — 实现 _handle_conflict()                      | not-started |      |
-| T-010 | cli.py — 增强 init 命令                               | not-started |      |
-| T-011 | cli.py — 增强 pull 命令（pull 前调用 _backup_to_branch） | not-started | |
-| T-012 | cli.py — 新增 manage 命令（list/add/remove）          | not-started |      |
-| T-013 | cli.py — _build_engine() 按 managed_tools 过滤 adapter | not-started | |
-| T-014 | 测试增强后的 init 命令                                | not-started |      |
-| T-015 | 测试 pull 的 backup 分支行为                          | not-started |      |
-| T-016 | 测试 manage 命令                                      | not-started |      |
-| T-017 | 测试 _build_engine() adapter 过滤逻辑                 | not-started |      |
+| T-002 | 测试 managed_tools 数据模型                           | done        |      |
+| T-003 | git_repo.py — 新增分支管理方法                        | done        |      |
+| T-004 | 测试 GitRepo 分支管理方法                             | done        |      |
+| T-005 | sync_engine.py — 修复 push 完整镜像                   | done        |      |
+| T-006 | 测试 push 完整镜像语义                                | done        |      |
+| T-007 | cli.py — 实现 _discover_tools() + _backup_branch_name() | done      |      |
+| T-008 | cli.py — 实现 _backup_to_branch()                     | done        |      |
+| T-009 | cli.py — 实现 _handle_conflict()                      | done        |      |
+| T-010 | cli.py — 增强 init 命令                               | done        |      |
+| T-011 | cli.py — 增强 pull 命令（pull 前调用 _backup_to_branch） | done     |      |
+| T-012 | cli.py — 新增 manage 命令（list/add/remove）          | done        |      |
+| T-013 | cli.py — _build_engine() 按 managed_tools 过滤 adapter | done      |      |
+| T-014 | 测试增强后的 init 命令                                | done        |      |
+| T-015 | 测试 pull 的 backup 分支行为                          | done        |      |
+| T-016 | 测试 manage 命令                                      | done        |      |
+| T-017 | 测试 _build_engine() adapter 过滤逻辑                 | done        |      |
 
 ---
 

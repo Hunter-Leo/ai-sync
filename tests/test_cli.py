@@ -133,6 +133,9 @@ class TestInit:
             patch("ai_sync.cli._DEFAULT_REPO_DIR", tmp_path / "repo"),
             patch("ai_sync.cli.ConfigStore") as mock_store_cls,
             patch("ai_sync.cli.GitRepo", return_value=mock_git_repo),
+            patch("ai_sync.cli._discover_tools", return_value=[]),
+            patch("ai_sync.cli._build_engine"),
+            patch("ai_sync.cli._handle_conflict"),
         ):
             mock_store = MagicMock()
             mock_store.exists.return_value = False
@@ -156,6 +159,9 @@ class TestInit:
             patch("ai_sync.cli._DEFAULT_REPO_DIR", tmp_path / "repo"),
             patch("ai_sync.cli.ConfigStore") as mock_store_cls,
             patch("ai_sync.cli.GitRepo", return_value=mock_git_repo),
+            patch("ai_sync.cli._discover_tools", return_value=[]),
+            patch("ai_sync.cli._build_engine"),
+            patch("ai_sync.cli._handle_conflict"),
         ):
             mock_store = MagicMock()
             mock_store.exists.return_value = False
@@ -171,7 +177,6 @@ class TestInit:
         mock_git_repo.clone.assert_called_once()
 
     def test_local_mode_valid_path(self, tmp_path: Path) -> None:
-        # Create a fake git repo
         local_repo = tmp_path / "myrepo"
         local_repo.mkdir()
         (local_repo / ".git").mkdir()
@@ -179,6 +184,9 @@ class TestInit:
         with (
             patch("ai_sync.cli._DEFAULT_CONFIG_DIR", tmp_path / "config"),
             patch("ai_sync.cli.ConfigStore") as mock_store_cls,
+            patch("ai_sync.cli._discover_tools", return_value=[]),
+            patch("ai_sync.cli._build_engine"),
+            patch("ai_sync.cli._handle_conflict"),
         ):
             mock_store = MagicMock()
             mock_store.exists.return_value = False
@@ -196,6 +204,7 @@ class TestInit:
         with (
             patch("ai_sync.cli._DEFAULT_CONFIG_DIR", tmp_path / "config"),
             patch("ai_sync.cli.ConfigStore") as mock_store_cls,
+            patch("ai_sync.cli._discover_tools", return_value=[]),
         ):
             mock_store = MagicMock()
             mock_store.exists.return_value = False
@@ -213,6 +222,7 @@ class TestInit:
         with (
             patch("ai_sync.cli._DEFAULT_CONFIG_DIR", tmp_path / "config"),
             patch("ai_sync.cli.ConfigStore") as mock_store_cls,
+            patch("ai_sync.cli._discover_tools", return_value=[]),
         ):
             mock_store = MagicMock()
             mock_store.exists.return_value = False
@@ -253,3 +263,226 @@ class TestEmbedToken:
     def test_returns_original_when_token_empty(self) -> None:
         url = "https://github.com/user/repo.git"
         assert _embed_token(url, "") == url
+
+
+# ---------------------------------------------------------------------------
+# T-014: init — tool discovery, conflict handling, managed_tools in config
+# ---------------------------------------------------------------------------
+
+class TestInitEnhanced:
+    def test_managed_tools_saved_in_config(self, tmp_path: Path) -> None:
+        mock_git_repo = MagicMock()
+        with (
+            patch("ai_sync.cli._DEFAULT_CONFIG_DIR", tmp_path),
+            patch("ai_sync.cli._DEFAULT_REPO_DIR", tmp_path / "repo"),
+            patch("ai_sync.cli.ConfigStore") as mock_store_cls,
+            patch("ai_sync.cli.GitRepo", return_value=mock_git_repo),
+            patch("ai_sync.cli._discover_tools", return_value=["claude-code", "gemini"]),
+            patch("ai_sync.cli._build_engine"),
+            patch("ai_sync.cli._handle_conflict"),
+        ):
+            mock_store = MagicMock()
+            mock_store.exists.return_value = False
+            mock_store_cls.return_value = mock_store
+            result = runner.invoke(app, ["init"], input="1\nn\nhttps://github.com/u/r.git\nn\n")
+        assert result.exit_code == 0
+        saved_config = mock_store.save.call_args[0][0]
+        assert saved_config.managed_tools == ["claude-code", "gemini"]
+
+    def test_no_conflict_when_repo_empty(self, tmp_path: Path) -> None:
+        mock_handle = MagicMock()
+        with (
+            patch("ai_sync.cli._DEFAULT_CONFIG_DIR", tmp_path),
+            patch("ai_sync.cli._DEFAULT_REPO_DIR", tmp_path / "repo"),
+            patch("ai_sync.cli.ConfigStore") as mock_store_cls,
+            patch("ai_sync.cli.GitRepo"),
+            patch("ai_sync.cli._discover_tools", return_value=[]),
+            patch("ai_sync.cli._build_engine"),
+            patch("ai_sync.cli._handle_conflict", mock_handle),
+        ):
+            mock_store = MagicMock()
+            mock_store.exists.return_value = False
+            mock_store_cls.return_value = mock_store
+            runner.invoke(app, ["init"], input="1\nn\nhttps://github.com/u/r.git\nn\n")
+        mock_handle.assert_called_once()
+
+    def test_empty_managed_tools_when_user_rejects_all(self, tmp_path: Path) -> None:
+        with (
+            patch("ai_sync.cli._DEFAULT_CONFIG_DIR", tmp_path),
+            patch("ai_sync.cli._DEFAULT_REPO_DIR", tmp_path / "repo"),
+            patch("ai_sync.cli.ConfigStore") as mock_store_cls,
+            patch("ai_sync.cli.GitRepo"),
+            patch("ai_sync.cli._discover_tools", return_value=[]),
+            patch("ai_sync.cli._build_engine"),
+            patch("ai_sync.cli._handle_conflict"),
+        ):
+            mock_store = MagicMock()
+            mock_store.exists.return_value = False
+            mock_store_cls.return_value = mock_store
+            runner.invoke(app, ["init"], input="1\nn\nhttps://github.com/u/r.git\nn\n")
+        saved_config = mock_store.save.call_args[0][0]
+        assert saved_config.managed_tools == []
+
+
+# ---------------------------------------------------------------------------
+# T-015: pull — backup branch called before engine.pull()
+# ---------------------------------------------------------------------------
+
+class TestPullBackup:
+    def test_backup_called_before_pull(self) -> None:
+        call_order: list[str] = []
+
+        def fake_backup(*args, **kwargs) -> None:  # type: ignore[no-untyped-def]
+            call_order.append("backup")
+
+        mock_engine = MagicMock()
+        mock_engine._repo = MagicMock()
+        mock_engine._repo_dir = MagicMock()
+
+        def fake_pull() -> PullResult:
+            call_order.append("pull")
+            return PullResult(tools=[], file_count=0)
+
+        mock_engine.pull.side_effect = fake_pull
+
+        with (
+            patch("ai_sync.cli._build_engine", return_value=mock_engine),
+            patch("ai_sync.cli._backup_to_branch", side_effect=fake_backup),
+        ):
+            result = runner.invoke(app, ["pull"])
+        assert result.exit_code == 0
+        assert call_order == ["backup", "pull"]
+
+    def test_pull_continues_when_backup_push_fails(self) -> None:
+        mock_engine = MagicMock()
+        mock_engine._repo = MagicMock()
+        mock_engine._repo_dir = MagicMock()
+        mock_engine.pull.return_value = PullResult(tools=["gemini"], file_count=2)
+
+        with (
+            patch("ai_sync.cli._build_engine", return_value=mock_engine),
+            patch("ai_sync.cli._backup_to_branch"),
+        ):
+            result = runner.invoke(app, ["pull"])
+        assert result.exit_code == 0
+        mock_engine.pull.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# T-016: manage list / add / remove
+# ---------------------------------------------------------------------------
+
+class TestManage:
+    def _make_store(self, tmp_path: Path, managed_tools: list[str]) -> MagicMock:
+        mock_store = MagicMock()
+        mock_store.load.return_value = RemoteConfig(
+            repo_url="https://github.com/u/r.git",
+            managed_tools=managed_tools,
+        )
+        return mock_store
+
+    def test_list_empty(self, tmp_path: Path) -> None:
+        with patch("ai_sync.cli.ConfigStore") as mock_cls:
+            mock_cls.return_value = self._make_store(tmp_path, [])
+            result = runner.invoke(app, ["manage", "list"])
+        assert result.exit_code == 0
+        assert "all tools" in result.output.lower()
+
+    def test_list_nonempty(self, tmp_path: Path) -> None:
+        with patch("ai_sync.cli.ConfigStore") as mock_cls:
+            mock_cls.return_value = self._make_store(tmp_path, ["claude-code", "gemini"])
+            result = runner.invoke(app, ["manage", "list"])
+        assert result.exit_code == 0
+        assert "claude-code" in result.output
+        assert "gemini" in result.output
+
+    def test_add_valid_tool(self, tmp_path: Path) -> None:
+        mock_store = self._make_store(tmp_path, [])
+        with (
+            patch("ai_sync.cli.ConfigStore", return_value=mock_store),
+            patch("ai_sync.cli.Path.home", return_value=tmp_path),
+        ):
+            result = runner.invoke(app, ["manage", "add", "gemini"])
+        assert result.exit_code == 0
+        saved = mock_store.save.call_args[0][0]
+        assert "gemini" in saved.managed_tools
+
+    def test_add_invalid_tool_id(self, tmp_path: Path) -> None:
+        with patch("ai_sync.cli.ConfigStore") as mock_cls:
+            mock_cls.return_value = self._make_store(tmp_path, [])
+            result = runner.invoke(app, ["manage", "add", "cursor"])
+        assert result.exit_code == 1
+
+    def test_add_duplicate_tool(self, tmp_path: Path) -> None:
+        mock_store = self._make_store(tmp_path, ["gemini"])
+        with patch("ai_sync.cli.ConfigStore", return_value=mock_store):
+            result = runner.invoke(app, ["manage", "add", "gemini"])
+        assert result.exit_code == 0
+        assert "already" in result.output.lower()
+        mock_store.save.assert_not_called()
+
+    def test_remove_existing_tool(self, tmp_path: Path) -> None:
+        mock_store = self._make_store(tmp_path, ["claude-code", "gemini"])
+        with patch("ai_sync.cli.ConfigStore", return_value=mock_store):
+            result = runner.invoke(app, ["manage", "remove", "gemini"])
+        assert result.exit_code == 0
+        saved = mock_store.save.call_args[0][0]
+        assert "gemini" not in saved.managed_tools
+
+    def test_remove_nonexistent_tool(self, tmp_path: Path) -> None:
+        mock_store = self._make_store(tmp_path, ["claude-code"])
+        with patch("ai_sync.cli.ConfigStore", return_value=mock_store):
+            result = runner.invoke(app, ["manage", "remove", "gemini"])
+        assert result.exit_code == 1
+
+
+# ---------------------------------------------------------------------------
+# T-017: _build_engine() adapter filtering
+# ---------------------------------------------------------------------------
+
+class TestBuildEngineAdapterFilter:
+    def _invoke_with_config(self, managed_tools: list[str]) -> MagicMock:
+        """Invoke _build_engine with a mocked config and capture SyncEngine args."""
+        from ai_sync.cli import _build_engine
+
+        mock_config = RemoteConfig(
+            repo_url="https://github.com/u/r.git",
+            managed_tools=managed_tools,
+        )
+        captured: dict = {}
+
+        def fake_sync_engine(**kwargs):  # type: ignore[no-untyped-def]
+            captured["adapters"] = kwargs.get("adapters", [])
+            return MagicMock()
+
+        with (
+            patch("ai_sync.cli.ConfigStore") as mock_store_cls,
+            patch("ai_sync.cli.GitRepo"),
+            patch("ai_sync.cli.SyncEngine", side_effect=fake_sync_engine),
+            patch("ai_sync.cli.FileCollector"),
+            patch("ai_sync.cli.ManifestManager"),
+            patch("ai_sync.cli._DEFAULT_CONFIG_DIR", Path("/tmp")),
+            patch("ai_sync.cli._DEFAULT_REPO_DIR", Path("/tmp/repo")),
+        ):
+            mock_store = MagicMock()
+            mock_store.load.return_value = mock_config
+            mock_store_cls.return_value = mock_store
+            _build_engine()
+
+        return captured.get("adapters", [])
+
+    def test_filtered_to_single_tool(self) -> None:
+        from ai_sync.adapters.gemini import GeminiAdapter
+        adapters = self._invoke_with_config(["gemini"])
+        assert len(adapters) == 1
+        assert isinstance(adapters[0], GeminiAdapter)
+
+    def test_empty_managed_tools_uses_all_adapters(self) -> None:
+        adapters = self._invoke_with_config([])
+        assert len(adapters) == 4
+
+    def test_invalid_tool_id_skipped_with_warning(self, capsys) -> None:
+        adapters = self._invoke_with_config(["gemini", "nonexistent-tool"])
+        from ai_sync.adapters.gemini import GeminiAdapter
+        assert len(adapters) == 1
+        assert isinstance(adapters[0], GeminiAdapter)
