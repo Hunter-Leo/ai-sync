@@ -10,7 +10,7 @@ uses these models — no bare dicts or tuples.
 from datetime import datetime
 from enum import StrEnum
 from pathlib import Path
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field
 
@@ -36,16 +36,39 @@ class Platform(StrEnum):
 # ---------------------------------------------------------------------------
 
 
-class AppConfig(BaseModel):
-    """Local ai-sync configuration stored in ~/.config/ai-sync/config.json.
+class RemoteConfig(BaseModel):
+    """Configuration for remote-hosted repository mode.
+
+    The repository is cloned to ~/.config/ai-sync/repo/ and managed by ai-sync.
+    An optional token is used for HTTPS authentication with private repositories.
 
     Attributes:
-        github_token: Personal access token with repo scope.
-        repo_url: HTTPS clone URL of the private sync repository.
+        mode: Discriminator field, always "remote".
+        repo_url: HTTPS clone URL of the sync repository.
+        token: Optional HTTPS authentication token for private repositories.
     """
 
-    github_token: str = Field(description="GitHub personal access token with repo scope")
-    repo_url: str = Field(description="HTTPS clone URL of the private sync repository")
+    mode: Literal["remote"] = "remote"
+    repo_url: str = Field(description="HTTPS clone URL of the sync repository")
+    token: str | None = Field(default=None, description="Optional HTTPS authentication token")
+
+
+class LocalConfig(BaseModel):
+    """Configuration for local repository mode.
+
+    The user manages their own git clone and credentials. ai-sync reads and
+    writes files directly in the provided directory without performing clone.
+
+    Attributes:
+        mode: Discriminator field, always "local".
+        local_repo_path: Absolute path to the user-managed local git clone.
+    """
+
+    mode: Literal["local"] = "local"
+    local_repo_path: Path = Field(description="Absolute path to the local git clone")
+
+
+AppConfig = Annotated[RemoteConfig | LocalConfig, Field(discriminator="mode")]
 
 
 class Manifest(BaseModel):
@@ -193,22 +216,3 @@ class GitOperationError(AiSyncError):
         """
         super().__init__(message)
         self.original = original
-
-
-class GitHubAPIError(AiSyncError):
-    """Raised when a GitHub API call fails.
-
-    Args:
-        message: Human-readable description of what failed.
-        status_code: HTTP status code returned by the API, if available.
-    """
-
-    def __init__(self, message: str, status_code: int | None = None) -> None:
-        """Initialize GitHubAPIError.
-
-        Args:
-            message: Human-readable description of what failed.
-            status_code: HTTP status code returned by the API, if available.
-        """
-        super().__init__(message)
-        self.status_code = status_code

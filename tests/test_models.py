@@ -1,21 +1,23 @@
 """Unit tests for ai_sync.models."""
 
 from datetime import datetime, timezone
+from pathlib import Path
 
 import pytest
-from pydantic import ValidationError
+from pydantic import TypeAdapter, ValidationError
 
 from ai_sync.models import (
     AiSyncError,
     AppConfig,
     CollectedFile,
     ConfigNotFoundError,
-    GitHubAPIError,
     GitOperationError,
+    LocalConfig,
     Manifest,
     Platform,
     PullResult,
     PushResult,
+    RemoteConfig,
     RepoNotInitializedError,
     StatusEntry,
     SyncItem,
@@ -36,19 +38,67 @@ class TestPlatform:
             Platform("freebsd")
 
 
-class TestAppConfig:
-    def test_instantiation(self) -> None:
-        cfg = AppConfig(github_token="ghp_abc", repo_url="https://github.com/u/r.git")
-        assert cfg.github_token == "ghp_abc"
+class TestRemoteConfig:
+    def test_instantiation_without_token(self) -> None:
+        cfg = RemoteConfig(repo_url="https://github.com/u/r.git")
+        assert cfg.mode == "remote"
         assert cfg.repo_url == "https://github.com/u/r.git"
+        assert cfg.token is None
 
-    def test_missing_fields(self) -> None:
-        with pytest.raises(ValidationError):
-            AppConfig(github_token="tok")  # type: ignore[call-arg]
+    def test_instantiation_with_token(self) -> None:
+        cfg = RemoteConfig(repo_url="https://github.com/u/r.git", token="ghp_abc")
+        assert cfg.token == "ghp_abc"
 
-    def test_wrong_type(self) -> None:
+    def test_missing_repo_url(self) -> None:
         with pytest.raises(ValidationError):
-            AppConfig(github_token=123, repo_url="url")  # type: ignore[arg-type]
+            RemoteConfig()  # type: ignore[call-arg]
+
+    def test_serialization(self) -> None:
+        cfg = RemoteConfig(repo_url="https://example.com/r.git", token="tok")
+        data = cfg.model_dump(mode="json")
+        assert data["mode"] == "remote"
+        assert data["repo_url"] == "https://example.com/r.git"
+        assert data["token"] == "tok"
+
+
+class TestLocalConfig:
+    def test_instantiation(self, tmp_path: Path) -> None:
+        cfg = LocalConfig(local_repo_path=tmp_path)
+        assert cfg.mode == "local"
+        assert cfg.local_repo_path == tmp_path
+
+    def test_missing_path(self) -> None:
+        with pytest.raises(ValidationError):
+            LocalConfig()  # type: ignore[call-arg]
+
+    def test_path_serialized_as_string(self, tmp_path: Path) -> None:
+        cfg = LocalConfig(local_repo_path=tmp_path)
+        data = cfg.model_dump(mode="json")
+        assert isinstance(data["local_repo_path"], str)
+
+
+class TestAppConfigUnion:
+    _adapter: TypeAdapter = TypeAdapter(AppConfig)  # type: ignore[type-arg]
+
+    def test_routes_to_remote(self) -> None:
+        cfg = self._adapter.validate_python(
+            {"mode": "remote", "repo_url": "https://example.com/r.git"}
+        )
+        assert isinstance(cfg, RemoteConfig)
+
+    def test_routes_to_local(self, tmp_path: Path) -> None:
+        cfg = self._adapter.validate_python(
+            {"mode": "local", "local_repo_path": str(tmp_path)}
+        )
+        assert isinstance(cfg, LocalConfig)
+
+    def test_missing_mode_raises(self) -> None:
+        with pytest.raises(ValidationError):
+            self._adapter.validate_python({"repo_url": "https://example.com/r.git"})
+
+    def test_invalid_mode_raises(self) -> None:
+        with pytest.raises(ValidationError):
+            self._adapter.validate_python({"mode": "ssh", "repo_url": "git@example.com"})
 
 
 class TestManifest:
@@ -137,17 +187,12 @@ class TestExceptions:
         assert issubclass(ConfigNotFoundError, AiSyncError)
         assert issubclass(RepoNotInitializedError, AiSyncError)
         assert issubclass(GitOperationError, AiSyncError)
-        assert issubclass(GitHubAPIError, AiSyncError)
 
     def test_git_operation_error(self) -> None:
         orig = ValueError("git failed")
         err = GitOperationError("push failed", original=orig)
         assert str(err) == "push failed"
         assert err.original is orig
-
-    def test_github_api_error(self) -> None:
-        err = GitHubAPIError("not found", status_code=404)
-        assert err.status_code == 404
 
     def test_catch_as_base(self) -> None:
         with pytest.raises(AiSyncError):

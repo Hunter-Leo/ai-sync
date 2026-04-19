@@ -14,19 +14,25 @@ from ai_sync.models import GitOperationError, RepoNotInitializedError
 
 
 class GitRepo:
-    """Manages the local git clone of the remote sync repository.
+    """Manages the local git clone of the sync repository.
+
+    Supports two modes:
+    - Remote mode: ``remote_url`` is provided; ``clone()`` fetches from the URL.
+    - Local mode: ``remote_url`` is None; ``clone()`` is a no-op and the caller
+      is responsible for providing a valid git repository at ``repo_dir``.
 
     Args:
         repo_dir: Local directory where the repository is (or will be) cloned.
-        remote_url: HTTPS URL of the remote repository.
+        remote_url: HTTPS URL of the remote repository, or None for local mode.
     """
 
-    def __init__(self, repo_dir: Path, remote_url: str) -> None:
+    def __init__(self, repo_dir: Path, remote_url: str | None = None) -> None:
         """Initialize GitRepo.
 
         Args:
             repo_dir: Local directory for the git clone.
-            remote_url: HTTPS clone URL of the remote repository.
+            remote_url: HTTPS clone URL of the remote repository, or None to
+                skip cloning (local mode).
         """
         self._repo_dir = repo_dir
         self._remote_url = remote_url
@@ -46,11 +52,14 @@ class GitRepo:
     def clone(self) -> None:
         """Clone the remote repository into repo_dir.
 
-        If the repository is already cloned, this is a no-op.
+        If ``remote_url`` is None (local mode), this method is a no-op.
+        If the repository is already cloned, this is also a no-op.
 
         Raises:
             GitOperationError: If the clone fails.
         """
+        if self._remote_url is None:
+            return
         if self.is_cloned():
             return
         try:
