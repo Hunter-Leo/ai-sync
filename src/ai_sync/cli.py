@@ -61,7 +61,10 @@ def init() -> None:
             _console.print("Aborted.")
             raise typer.Exit()
 
-    token = typer.prompt("GitHub personal access token (repo scope)")
+    token = typer.prompt(
+        "GitHub personal access token (repo scope)",
+        hide_input=True,
+    )
 
     create_new = typer.confirm("Create a new private repository on GitHub?", default=True)
 
