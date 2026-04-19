@@ -108,6 +108,27 @@ class TestBackwardCompatMigration:
         assert isinstance(loaded, RemoteConfig)
         assert loaded.token is None
 
+    def test_legacy_without_managed_tools_defaults_to_empty(self, tmp_path: Path) -> None:
+        """Old config.json without managed_tools deserializes to managed_tools=[]."""
+        p = tmp_path / "config.json"
+        p.write_text(
+            json.dumps({"mode": "remote", "repo_url": "https://github.com/u/r.git"}),
+            encoding="utf-8",
+        )
+        loaded = ConfigStore(config_path=p).load()
+        assert isinstance(loaded, RemoteConfig)
+        assert loaded.managed_tools == []
+
+    def test_managed_tools_roundtrip(self, tmp_path: Path) -> None:
+        """managed_tools is persisted and restored correctly."""
+        p = tmp_path / "config.json"
+        cfg = RemoteConfig(repo_url="https://github.com/u/r.git", managed_tools=["claude-code", "gemini"])
+        store = ConfigStore(config_path=p)
+        store.save(cfg)
+        loaded = store.load()
+        assert isinstance(loaded, RemoteConfig)
+        assert loaded.managed_tools == ["claude-code", "gemini"]
+
 
 class TestFilePermissions:
     def test_config_file_is_owner_readable_only(self, store: ConfigStore, tmp_path: Path) -> None:

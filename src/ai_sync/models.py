@@ -46,11 +46,13 @@ class RemoteConfig(BaseModel):
         mode: Discriminator field, always "remote".
         repo_url: HTTPS clone URL of the sync repository.
         token: Optional HTTPS authentication token for private repositories.
+        managed_tools: Tool IDs to sync. Empty list means all known tools (backward compat).
     """
 
     mode: Literal["remote"] = "remote"
     repo_url: str = Field(description="HTTPS clone URL of the sync repository")
     token: str | None = Field(default=None, description="Optional HTTPS authentication token")
+    managed_tools: list[str] = Field(default_factory=list, description="Tool IDs to sync; empty = all tools")
 
 
 class LocalConfig(BaseModel):
@@ -62,10 +64,12 @@ class LocalConfig(BaseModel):
     Attributes:
         mode: Discriminator field, always "local".
         local_repo_path: Absolute path to the user-managed local git clone.
+        managed_tools: Tool IDs to sync. Empty list means all known tools (backward compat).
     """
 
     mode: Literal["local"] = "local"
     local_repo_path: Path = Field(description="Absolute path to the local git clone")
+    managed_tools: list[str] = Field(default_factory=list, description="Tool IDs to sync; empty = all tools")
 
 
 AppConfig = Annotated[RemoteConfig | LocalConfig, Field(discriminator="mode")]

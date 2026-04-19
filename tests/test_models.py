@@ -60,6 +60,19 @@ class TestRemoteConfig:
         assert data["repo_url"] == "https://example.com/r.git"
         assert data["token"] == "tok"
 
+    def test_managed_tools_default_empty(self) -> None:
+        cfg = RemoteConfig(repo_url="https://github.com/u/r.git")
+        assert cfg.managed_tools == []
+
+    def test_managed_tools_stored(self) -> None:
+        cfg = RemoteConfig(repo_url="https://github.com/u/r.git", managed_tools=["claude-code", "gemini"])
+        assert cfg.managed_tools == ["claude-code", "gemini"]
+
+    def test_managed_tools_in_serialization(self) -> None:
+        cfg = RemoteConfig(repo_url="https://github.com/u/r.git", managed_tools=["gemini"])
+        data = cfg.model_dump(mode="json")
+        assert data["managed_tools"] == ["gemini"]
+
 
 class TestLocalConfig:
     def test_instantiation(self, tmp_path: Path) -> None:
@@ -75,6 +88,14 @@ class TestLocalConfig:
         cfg = LocalConfig(local_repo_path=tmp_path)
         data = cfg.model_dump(mode="json")
         assert isinstance(data["local_repo_path"], str)
+
+    def test_managed_tools_default_empty(self, tmp_path: Path) -> None:
+        cfg = LocalConfig(local_repo_path=tmp_path)
+        assert cfg.managed_tools == []
+
+    def test_managed_tools_stored(self, tmp_path: Path) -> None:
+        cfg = LocalConfig(local_repo_path=tmp_path, managed_tools=["opencode"])
+        assert cfg.managed_tools == ["opencode"]
 
 
 class TestAppConfigUnion:
