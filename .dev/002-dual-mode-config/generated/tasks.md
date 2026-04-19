@@ -19,7 +19,7 @@
 | T-006 | git_repo.py 单元测试                          | done        |      |
 | T-007 | 重构 cli.py（init 双模式 + _build_engine）    | done        |      |
 | T-008 | cli.py 集成测试                               | done        |      |
-| T-009 | 清理（删除 github_client，移除 PyGithub 依赖）| in-progress |      |
+| T-009 | 清理（删除 github_client，移除 PyGithub 依赖）| done        |      |
 
 ---
 
