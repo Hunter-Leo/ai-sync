@@ -22,9 +22,8 @@ from ai_sync.adapters.shared_skills import SharedSkillsAdapter
 from ai_sync.config_store import ConfigStore
 from ai_sync.file_collector import FileCollector
 from ai_sync.git_repo import GitRepo
-from ai_sync.github_client import GitHubClient
 from ai_sync.manifest import ManifestManager
-from ai_sync.models import AppConfig, AiSyncError, Platform
+from ai_sync.models import AiSyncError, AppConfig, LocalConfig, Platform, RemoteConfig
 from ai_sync.path_mapper import PathMapper
 from ai_sync.sync_engine import SyncEngine
 
@@ -48,7 +47,7 @@ _DEFAULT_REPO_DIR = _DEFAULT_CONFIG_DIR / "repo"
 
 @app.command()
 def init() -> None:
-    """Configure GitHub Token and repository, then clone it locally."""
+    """Configure the sync repository and save credentials locally."""
     _console.print("[bold]ai-sync init[/bold]")
 
     store = ConfigStore(config_path=_DEFAULT_CONFIG_DIR / "config.json")
@@ -61,40 +60,77 @@ def init() -> None:
             _console.print("Aborted.")
             raise typer.Exit()
 
-    token = typer.prompt(
-        "GitHub personal access token (repo scope)",
-        hide_input=True,
+    mode_input = typer.prompt(
+        "Select mode\n  1) Remote — use a remote git repository\n  2) Local  — use an existing local clone\nChoice",
+        default="1",
     )
 
-    create_new = typer.confirm("Create a new private repository on GitHub?", default=True)
-
-    if create_new:
-        repo_name = typer.prompt("Repository name", default="ai-sync-config")
-        try:
-            gh = GitHubClient(token=token)
-            repo_url = gh.create_private_repo(repo_name)
-            _console.print(f"[green]Created:[/green] {repo_url}")
-        except AiSyncError as exc:
-            _err_console.print(f"[red]Error:[/red] {exc}")
-            raise typer.Exit(code=1) from exc
+    if mode_input.strip() == "2":
+        _init_local(store)
     else:
-        repo_url = typer.prompt(
-            "Repository HTTPS clone URL",
-            default="https://github.com/you/ai-sync-config.git",
+        _init_remote(store)
+
+
+def _init_remote(store: ConfigStore) -> None:
+    """Handle init flow for remote repository mode.
+
+    Args:
+        store: ConfigStore instance to persist the configuration.
+    """
+    needs_new = typer.confirm("Do you need to create a new repository?", default=False)
+    if needs_new:
+        _console.print(
+            "\n[bold]To create a new repository:[/bold]\n"
+            "  1. Visit your hosting provider (e.g. github.com/new) and create a private repo.\n"
+            "  2. Generate an access token with read/write access to repository contents.\n"
+            "     GitHub: Settings → Developer settings → Fine-grained tokens → Contents: Read & Write\n"
+            "  3. Copy the HTTPS clone URL and token, then continue below.\n"
         )
 
-    config = AppConfig(github_token=token, repo_url=repo_url)
+    repo_url = typer.prompt("Repository HTTPS clone URL")
+
+    needs_token = typer.confirm("Does this repository require a token for HTTPS access?", default=True)
+    token: str | None = None
+    if needs_token:
+        token = typer.prompt("Access token", hide_input=True)
+
+    config = RemoteConfig(repo_url=repo_url, token=token)
     store.save(config)
     _console.print(f"[green]Config saved:[/green] {store._path}")
 
     _console.print("Cloning repository…")
     try:
-        git_repo = GitRepo(repo_dir=_DEFAULT_REPO_DIR, remote_url=repo_url)
+        effective_url = _embed_token(repo_url, token)
+        git_repo = GitRepo(repo_dir=_DEFAULT_REPO_DIR, remote_url=effective_url)
         git_repo.clone()
         _console.print(f"[green]Cloned to:[/green] {_DEFAULT_REPO_DIR}")
     except AiSyncError as exc:
         _err_console.print(f"[red]Error:[/red] {exc}")
         raise typer.Exit(code=1) from exc
+
+
+def _init_local(store: ConfigStore) -> None:
+    """Handle init flow for local repository mode.
+
+    Args:
+        store: ConfigStore instance to persist the configuration.
+    """
+    path_str = typer.prompt("Path to your local git clone")
+    local_path = Path(path_str).expanduser().resolve()
+
+    if not local_path.exists():
+        _err_console.print(f"[red]Error:[/red] Path does not exist: {local_path}")
+        raise typer.Exit(code=1)
+
+    if not (local_path / ".git").is_dir():
+        _err_console.print(
+            f"[red]Error:[/red] Not a git repository (no .git directory): {local_path}"
+        )
+        raise typer.Exit(code=1)
+
+    config = LocalConfig(local_repo_path=local_path)
+    store.save(config)
+    _console.print(f"[green]Config saved:[/green] {store._path}")
 
 
 @app.command()
@@ -175,7 +211,7 @@ def _build_engine() -> SyncEngine:
     """Assemble and return a fully configured SyncEngine.
 
     Reads the local config, detects the current platform, and wires together
-    all components. Called by push, pull, and status commands.
+    all components. Supports both RemoteConfig and LocalConfig modes.
 
     Returns:
         A ready-to-use SyncEngine instance.
@@ -198,9 +234,16 @@ def _build_engine() -> SyncEngine:
         SharedSkillsAdapter(home=home),
     ]
 
-    repo = GitRepo(repo_dir=_DEFAULT_REPO_DIR, remote_url=config.repo_url)
+    if isinstance(config, RemoteConfig):
+        effective_url = _embed_token(config.repo_url, config.token)
+        repo = GitRepo(repo_dir=_DEFAULT_REPO_DIR, remote_url=effective_url)
+        repo_dir = _DEFAULT_REPO_DIR
+    else:
+        repo = GitRepo(repo_dir=config.local_repo_path, remote_url=None)
+        repo_dir = config.local_repo_path
+
     collector = FileCollector(mapper=mapper)
-    manifest_mgr = ManifestManager(repo_dir=_DEFAULT_REPO_DIR)
+    manifest_mgr = ManifestManager(repo_dir=repo_dir)
 
     return SyncEngine(
         adapters=adapters,
@@ -208,8 +251,29 @@ def _build_engine() -> SyncEngine:
         mapper=mapper,
         collector=collector,
         manifest_mgr=manifest_mgr,
-        repo_dir=_DEFAULT_REPO_DIR,
+        repo_dir=repo_dir,
     )
+
+
+def _embed_token(url: str, token: str | None) -> str:
+    """Embed an authentication token into an HTTPS git URL.
+
+    Transforms ``https://host/repo.git`` into
+    ``https://<token>@host/repo.git`` when a token is provided.
+
+    Args:
+        url: The original HTTPS clone URL.
+        token: Optional authentication token.
+
+    Returns:
+        The URL with the token embedded, or the original URL if token is None.
+    """
+    if not token:
+        return url
+    if "://" in url:
+        scheme, rest = url.split("://", 1)
+        return f"{scheme}://{token}@{rest}"
+    return url
 
 
 def _detect_platform() -> Platform:
