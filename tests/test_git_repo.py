@@ -146,3 +146,51 @@ class TestDiffFiles:
         gr = GitRepo(repo_dir=tmp_path / "repo", remote_url=str(seeded_remote))
         with pytest.raises(RepoNotInitializedError):
             gr.diff_files()
+
+
+class TestLocalMode:
+    """Tests for GitRepo with remote_url=None (local mode)."""
+
+    @pytest.fixture
+    def local_repo(self, tmp_path: Path, seeded_remote: Path) -> Path:
+        """Clone a repo locally to simulate a user-managed clone."""
+        repo_dir = tmp_path / "local_clone"
+        git.Repo.clone_from(str(seeded_remote), repo_dir)
+        repo = git.Repo(repo_dir)
+        repo.config_writer().set_value("user", "name", "Test").release()
+        repo.config_writer().set_value("user", "email", "test@test.com").release()
+        return repo_dir
+
+    def test_clone_is_noop_when_remote_url_none(self, tmp_path: Path) -> None:
+        """clone() must not raise and must not create any files when remote_url is None."""
+        repo_dir = tmp_path / "nonexistent"
+        gr = GitRepo(repo_dir=repo_dir, remote_url=None)
+        gr.clone()  # should not raise
+        assert not repo_dir.exists()
+
+    def test_is_cloned_false_when_dir_missing(self, tmp_path: Path) -> None:
+        gr = GitRepo(repo_dir=tmp_path / "nonexistent", remote_url=None)
+        assert gr.is_cloned() is False
+
+    def test_push_works_on_local_repo(self, tmp_path: Path, local_repo: Path) -> None:
+        gr = GitRepo(repo_dir=local_repo, remote_url=None)
+        (local_repo / "new.json").write_text("{}", encoding="utf-8")
+        result = gr.push("add new.json")
+        assert result is True
+
+    def test_pull_works_on_local_repo(
+        self, tmp_path: Path, seeded_remote: Path, local_repo: Path
+    ) -> None:
+        # Push a new commit to the remote from a separate clone.
+        other = tmp_path / "other"
+        r = git.Repo.clone_from(str(seeded_remote), other)
+        r.config_writer().set_value("user", "name", "Test").release()
+        r.config_writer().set_value("user", "email", "test@test.com").release()
+        (other / "extra.txt").write_text("hi", encoding="utf-8")
+        r.index.add(["extra.txt"])
+        r.index.commit("add extra")
+        r.remotes.origin.push()
+
+        gr = GitRepo(repo_dir=local_repo, remote_url=None)
+        gr.pull()
+        assert (local_repo / "extra.txt").exists()
