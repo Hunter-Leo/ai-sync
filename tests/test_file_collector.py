@@ -173,6 +173,41 @@ class TestSymlinks:
         repo_paths = {f.repo_path for f in files}
         assert "claude-code/hooks/pre.mjs" in repo_paths
 
+    def test_symlink_to_dir_inside_dir_skipped_silently(
+        self, tmp_path: Path, collector: FileCollector
+    ) -> None:
+        """Symlink inside a collected dir that resolves to a directory must be skipped.
+
+        Reproduces the real-world case where ~/.agents/skills/ contains
+        subdirectories that are symlinks pointing to other directories.
+        Without the is_file() guard, _collect_file receives a directory path
+        and raises EISDIR.
+        """
+        agents_skills = tmp_path / ".agents" / "skills"
+        agents_skills.mkdir(parents=True)
+
+        # A real skill directory (should be collected).
+        real_skill = agents_skills / "my-skill"
+        real_skill.mkdir()
+        (real_skill / "README.md").write_text("# skill", encoding="utf-8")
+
+        # A symlink inside agents/skills pointing to another directory.
+        target_dir = tmp_path / "external-plugin"
+        target_dir.mkdir()
+        (target_dir / "plugin.json").write_text("{}", encoding="utf-8")
+        link = agents_skills / "linked-plugin"
+        link.symlink_to(target_dir)
+
+        adapter = SharedSkillsAdapter(home=tmp_path)
+        # Must not raise; symlink-to-dir entry is silently skipped.
+        files = collector.collect(adapter)
+        repo_paths = {f.repo_path for f in files}
+
+        # The real file inside the real skill dir is collected.
+        assert "shared/agents/skills/my-skill/README.md" in repo_paths
+        # The symlink-to-dir itself is not collected (no EISDIR error).
+        assert not any("linked-plugin" in p for p in repo_paths)
+
 
 # ---------------------------------------------------------------------------
 # Exclude patterns

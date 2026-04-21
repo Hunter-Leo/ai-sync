@@ -68,6 +68,20 @@ class TestPush:
             result = runner.invoke(app, ["push"])
         assert result.exit_code == 1
 
+    def test_push_403_shows_hint(self) -> None:
+        from ai_sync.models import GitOperationError
+        err = GitOperationError("Failed to push: exit code(128) stderr: '403 Forbidden'")
+        with patch("ai_sync.cli._build_engine", side_effect=err):
+            result = runner.invoke(app, ["push"])
+        assert result.exit_code == 1
+        assert "ai-sync init" in result.output
+
+    def test_push_non_403_error_no_hint(self) -> None:
+        with patch("ai_sync.cli._build_engine", side_effect=AiSyncError("connection refused")):
+            result = runner.invoke(app, ["push"])
+        assert result.exit_code == 1
+        assert "ai-sync init" not in result.output
+
 
 # ---------------------------------------------------------------------------
 # pull
@@ -516,3 +530,48 @@ class TestBuildEngineAdapterFilter:
         from ai_sync.adapters.gemini import GeminiAdapter
         assert len(adapters) == 1
         assert isinstance(adapters[0], GeminiAdapter)
+
+
+# ---------------------------------------------------------------------------
+# Token guidance display
+# ---------------------------------------------------------------------------
+
+class TestTokenGuidance:
+    """Verify that token setup guidance is shown at the right time in init."""
+
+    def _invoke_init_remote(self, tmp_path: Path, input_str: str) -> str:
+        """Invoke 'ai-sync init' in remote mode and return combined output."""
+        mock_git_repo = MagicMock()
+        with (
+            patch("ai_sync.cli._DEFAULT_CONFIG_DIR", tmp_path),
+            patch("ai_sync.cli._DEFAULT_REPO_DIR", tmp_path / "repo"),
+            patch("ai_sync.cli.ConfigStore") as mock_store_cls,
+            patch("ai_sync.cli.GitRepo", return_value=mock_git_repo),
+            patch("ai_sync.cli._discover_tools", return_value=[]),
+            patch("ai_sync.cli._build_engine"),
+            patch("ai_sync.cli._handle_conflict"),
+        ):
+            mock_store = MagicMock()
+            mock_store.exists.return_value = False
+            mock_store_cls.return_value = mock_store
+            result = runner.invoke(app, ["init"], input=input_str)
+        return result.output
+
+    def test_token_guidance_shown_when_token_required(self, tmp_path: Path) -> None:
+        # mode=1(remote), no new repo, URL, yes token, token value
+        output = self._invoke_init_remote(
+            tmp_path,
+            "1\nn\nhttps://github.com/u/r.git\ny\nghp_abc\n",
+        )
+        assert "Fine-grained" in output
+        assert "Contents: Read and Write" in output
+        assert "repo" in output
+
+    def test_token_guidance_not_shown_when_token_not_required(self, tmp_path: Path) -> None:
+        # mode=1(remote), no new repo, URL, no token
+        output = self._invoke_init_remote(
+            tmp_path,
+            "1\nn\nhttps://github.com/u/r.git\nn\n",
+        )
+        assert "Fine-grained" not in output
+        assert "Contents: Read and Write" not in output

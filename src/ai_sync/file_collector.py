@@ -144,7 +144,7 @@ class FileCollector:
                 continue
 
             resolved_entry = self._resolve_path(entry)
-            if resolved_entry is None:
+            if resolved_entry is None or not resolved_entry.is_file():
                 continue
 
             repo_path = (Path(tool_prefix) / repo_dir / rel).as_posix()
