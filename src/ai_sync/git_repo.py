@@ -142,6 +142,40 @@ class GitRepo:
 
         return sorted(changed)
 
+    def fetch(self) -> None:
+        """Fetch from the remote origin without modifying the working tree.
+
+        In local mode (remote_url is None) or if the fetch fails (e.g. no
+        network), this method is a silent no-op — callers should not rely on
+        the result being up-to-date.
+        """
+        if self._remote_url is None:
+            return
+        try:
+            repo = self._get_repo()
+            repo.remotes.origin.fetch()
+        except Exception:  # noqa: BLE001 — intentionally silent
+            pass
+
+    def commits_behind(self) -> int:
+        """Return how many commits origin/main is ahead of the local HEAD.
+
+        Fetches are not performed here — call fetch() first if needed.
+        Returns 0 if the remote tracking branch does not exist or the repo
+        is not initialized.
+
+        Returns:
+            Number of commits the local clone is behind origin/main.
+        """
+        try:
+            repo = self._get_repo()
+            local = repo.head.commit
+            remote_ref = repo.remotes.origin.refs["main"]
+            count = sum(1 for _ in repo.iter_commits(f"{local}..{remote_ref}"))
+            return count
+        except Exception:  # noqa: BLE001 — remote ref may not exist
+            return 0
+
     def checkout_or_create_branch(self, name: str) -> None:
         """Switch to a branch, creating it if it does not exist.
 

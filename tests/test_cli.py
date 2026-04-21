@@ -94,26 +94,56 @@ class TestPull:
 # ---------------------------------------------------------------------------
 
 class TestStatus:
-    def test_status_in_sync(self) -> None:
+    def _make_engine(self, entries: list) -> MagicMock:
         mock_engine = MagicMock()
-        mock_engine.status.return_value = []
+        mock_engine.status.return_value = entries
+        mock_engine._repo.commits_behind.return_value = 0
+        mock_engine._manifest_mgr.read.return_value = None
+        return mock_engine
+
+    def test_status_in_sync(self) -> None:
+        mock_engine = self._make_engine([])
         with patch("ai_sync.cli._build_engine", return_value=mock_engine):
             result = runner.invoke(app, ["status"])
         assert result.exit_code == 0
-        assert "in sync" in result.output.lower()
+        assert "in sync" in result.output.lower() or "match" in result.output.lower()
 
     def test_status_shows_changes(self) -> None:
-        mock_engine = MagicMock()
-        mock_engine.status.return_value = [
+        mock_engine = self._make_engine([
             StatusEntry(path="claude-code/settings.json", state="modified"),
             StatusEntry(path="gemini/GEMINI.md", state="added"),
-        ]
+        ])
         with patch("ai_sync.cli._build_engine", return_value=mock_engine):
             result = runner.invoke(app, ["status"])
         assert result.exit_code == 0
         assert "claude-code/settings.json" in result.output
         assert "modified" in result.output
         assert "added" in result.output
+
+    def test_status_shows_behind_warning(self) -> None:
+        mock_engine = self._make_engine([])
+        mock_engine._repo.commits_behind.return_value = 3
+        with patch("ai_sync.cli._build_engine", return_value=mock_engine):
+            result = runner.invoke(app, ["status"])
+        assert result.exit_code == 0
+        assert "3" in result.output
+        assert "behind" in result.output.lower()
+
+    def test_status_shows_manifest_info(self) -> None:
+        from datetime import datetime, timezone
+        from ai_sync.models import Manifest, Platform
+        mock_engine = self._make_engine([])
+        mock_engine._manifest_mgr.read.return_value = Manifest(
+            last_push=datetime(2026, 4, 20, 9, 30, tzinfo=timezone.utc),
+            source_os=Platform.DARWIN,
+            source_home="{{HOME}}",
+            tools=["claude-code"],
+        )
+        with patch("ai_sync.cli._build_engine", return_value=mock_engine):
+            result = runner.invoke(app, ["status"])
+        assert result.exit_code == 0
+        assert "2026-04-20" in result.output
+        assert "darwin" in result.output.lower()
 
     def test_status_error(self) -> None:
         with patch("ai_sync.cli._build_engine", side_effect=AiSyncError("status failed")):

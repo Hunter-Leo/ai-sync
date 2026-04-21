@@ -198,27 +198,51 @@ def status() -> None:
     """Show the diff between local configs and the remote repository."""
     try:
         engine = _build_engine()
+        # Fetch silently — failure is non-fatal.
+        engine._repo.fetch()
+        behind = engine._repo.commits_behind()
         entries = engine.status()
+        manifest = engine._manifest_mgr.read()
     except AiSyncError as exc:
         _err_console.print(f"[red]Error:[/red] {exc}")
         raise typer.Exit(code=1) from exc
 
-    if not entries:
-        _console.print("[green]Everything is in sync.[/green]")
+    # Header: last push info from manifest.
+    if manifest:
+        ts = manifest.last_push.strftime("%Y-%m-%d %H:%M UTC")
+        _console.print(f"Last push: [cyan]{ts}[/cyan]  source: [cyan]{manifest.source_os}[/cyan]  tools: {', '.join(manifest.tools) or '—'}")
+    else:
+        _console.print("[dim]No manifest found — repository may be empty.[/dim]")
+
+    # Remote sync state.
+    if behind > 0:
+        _console.print(f"[yellow]⚠ {behind} commit(s) behind origin/main — run [bold]ai-sync pull[/bold][/yellow]")
+    else:
+        _console.print("[green]✓ Up to date with origin/main[/green]")
+
+    # File diff summary.
+    changed = [e for e in entries if e.state != "unchanged"]
+    if not changed:
+        _console.print("[green]Local configs match the repository.[/green]")
         return
 
-    table = Table(title="ai-sync status", show_header=True, header_style="bold")
+    counts = {"added": 0, "modified": 0, "deleted": 0}
+    for e in changed:
+        counts[e.state] = counts.get(e.state, 0) + 1
+    summary = "  ".join(
+        f"[{'green' if k == 'added' else 'yellow' if k == 'modified' else 'red'}]{v} {k}[/]"
+        for k, v in counts.items() if v
+    )
+    _console.print(summary)
+
+    table = Table(show_header=True, header_style="bold", box=None, padding=(0, 2))
     table.add_column("State", style="cyan", width=12)
     table.add_column("Path")
 
-    state_colors = {
-        "added": "green",
-        "modified": "yellow",
-        "deleted": "red",
-        "unchanged": "dim",
-    }
-
+    state_colors = {"added": "green", "modified": "yellow", "deleted": "red", "unchanged": "dim"}
     for entry in entries:
+        if entry.state == "unchanged":
+            continue
         color = state_colors.get(entry.state, "white")
         table.add_row(f"[{color}]{entry.state}[/{color}]", entry.path)
 
