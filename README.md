@@ -263,8 +263,8 @@ ai-configs/
 ## Development
 
 ```bash
-git clone https://github.com/you/agent-infra-sync
-cd agent-infra-sync
+git clone https://github.com/Hunter-Leo/ai-sync
+cd ai-sync
 uv sync
 uv run pytest
 uv run ai-sync --help
