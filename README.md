@@ -146,17 +146,21 @@ ai-sync pull
 
 ### `ai-sync status`
 
-Show what differs between local configs and the repository.
+Show what differs between local configs and the repository. Fetches from remote first (silently skips if offline).
 
 ```bash
 ai-sync status
 ```
 
 ```
-         State  Path
-       ─────────────────────────────────
-       modified  claude-code/settings.json
-          added  gemini/GEMINI.md
+Last push: 2026-04-20 09:30 UTC  source: darwin  tools: claude-code, gemini
+⚠ 2 commit(s) behind origin/main — run ai-sync pull
+2 modified  1 added
+
+  State       Path
+  modified    claude-code/settings.json
+  modified    gemini/settings.json
+  added       gemini/GEMINI.md
 ```
 
 ### `ai-sync manage`
