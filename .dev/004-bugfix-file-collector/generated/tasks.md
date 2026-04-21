@@ -10,6 +10,8 @@
 | T-004 | Unit tests for T-003                           | done        | Added TestTokenGuidance with 2 cases. |
 | T-005 | Add 403 hint in `push` error handler           | done        | 403 check + hint added; 40 cli tests pass. |
 | T-006 | Unit tests for T-005                           | done        | Added test_push_403_shows_hint + test_push_non_403_error_no_hint. |
+| T-007 | Sync remote URL when token changes             | in-progress |       |
+| T-008 | Unit tests for T-007                           | not-started |       |
 
 ---
 

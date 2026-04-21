@@ -222,6 +222,23 @@ class GitRepo:
                 f"Failed to commit: {exc}", original=exc
             ) from exc
 
+    def sync_remote_url(self) -> None:
+        """Update the local clone's remote URL to match the current remote_url.
+
+        Call this after loading config to ensure the embedded token stays in
+        sync with config.json. In local mode (remote_url is None) or when the
+        repo is not yet cloned, this is a no-op.
+        """
+        if self._remote_url is None or not self.is_cloned():
+            return
+        try:
+            repo = self._get_repo()
+            repo.remotes.origin.set_url(self._remote_url)
+        except GitCommandError as exc:
+            raise GitOperationError(
+                f"Failed to update remote URL: {exc}", original=exc
+            ) from exc
+
     def push_branch(self, name: str) -> None:
         """Push a branch to the remote origin.
 

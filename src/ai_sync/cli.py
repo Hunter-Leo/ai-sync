@@ -389,6 +389,7 @@ def _build_engine() -> SyncEngine:
     if isinstance(config, RemoteConfig):
         effective_url = _embed_token(config.repo_url, config.token)
         repo = GitRepo(repo_dir=_DEFAULT_REPO_DIR, remote_url=effective_url)
+        repo.sync_remote_url()
         repo_dir = _DEFAULT_REPO_DIR
     else:
         repo = GitRepo(repo_dir=config.local_repo_path, remote_url=None)
