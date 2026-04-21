@@ -102,6 +102,15 @@ def _init_remote(store: ConfigStore, managed_tools: list[str], home: Path) -> No
     needs_token = typer.confirm("Does this repository require a token for HTTPS access?", default=True)
     token: str | None = None
     if needs_token:
+        _console.print(
+            "\n[bold]GitHub token setup:[/bold]\n"
+            "  [cyan]Option A — Fine-grained PAT[/cyan] (recommended, more secure)\n"
+            "    Required permission: [bold]Contents: Read and Write[/bold]\n"
+            "    Create: https://github.com/settings/personal-access-tokens/new\n\n"
+            "  [cyan]Option B — Classic PAT[/cyan] (simpler)\n"
+            "    Required scope: [bold]repo[/bold]\n"
+            "    Create: https://github.com/settings/tokens/new\n"
+        )
         token = typer.prompt("Access token", hide_input=True)
 
     config = RemoteConfig(repo_url=repo_url, token=token, managed_tools=managed_tools)
