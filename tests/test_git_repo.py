@@ -295,3 +295,35 @@ class TestBranchManagement:
         # push_branch is a no-op in local mode regardless of clone state.
         gr = GitRepo(repo_dir=tmp_path / "norepo", remote_url=None)
         gr.push_branch("backup/x")  # must not raise
+
+
+class TestSyncRemoteUrl:
+    """Tests for GitRepo.sync_remote_url()."""
+
+    def test_updates_remote_url_in_cloned_repo(
+        self, tmp_path: Path, seeded_remote: Path
+    ) -> None:
+        repo_dir = tmp_path / "repo"
+        gr = GitRepo(repo_dir=repo_dir, remote_url=str(seeded_remote))
+        gr.clone()
+
+        new_url = str(seeded_remote) + "/new"
+        gr2 = GitRepo(repo_dir=repo_dir, remote_url=new_url)
+        gr2.sync_remote_url()
+
+        actual = git.Repo(repo_dir).remotes.origin.url
+        assert actual == new_url
+
+    def test_noop_when_local_mode(self, tmp_path: Path, seeded_remote: Path) -> None:
+        repo_dir = tmp_path / "repo"
+        git.Repo.clone_from(str(seeded_remote), repo_dir)
+        original_url = git.Repo(repo_dir).remotes.origin.url
+
+        gr = GitRepo(repo_dir=repo_dir, remote_url=None)
+        gr.sync_remote_url()  # must not raise or change URL
+
+        assert git.Repo(repo_dir).remotes.origin.url == original_url
+
+    def test_noop_when_not_cloned(self, tmp_path: Path, seeded_remote: Path) -> None:
+        gr = GitRepo(repo_dir=tmp_path / "norepo", remote_url=str(seeded_remote))
+        gr.sync_remote_url()  # must not raise
