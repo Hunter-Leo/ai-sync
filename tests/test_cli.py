@@ -68,6 +68,20 @@ class TestPush:
             result = runner.invoke(app, ["push"])
         assert result.exit_code == 1
 
+    def test_push_403_shows_hint(self) -> None:
+        from ai_sync.models import GitOperationError
+        err = GitOperationError("Failed to push: exit code(128) stderr: '403 Forbidden'")
+        with patch("ai_sync.cli._build_engine", side_effect=err):
+            result = runner.invoke(app, ["push"])
+        assert result.exit_code == 1
+        assert "ai-sync init" in result.output
+
+    def test_push_non_403_error_no_hint(self) -> None:
+        with patch("ai_sync.cli._build_engine", side_effect=AiSyncError("connection refused")):
+            result = runner.invoke(app, ["push"])
+        assert result.exit_code == 1
+        assert "ai-sync init" not in result.output
+
 
 # ---------------------------------------------------------------------------
 # pull

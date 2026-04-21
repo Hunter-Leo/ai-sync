@@ -173,6 +173,11 @@ def push() -> None:
         result = engine.push()
     except AiSyncError as exc:
         _err_console.print(f"[red]Error:[/red] {exc}")
+        if "403" in str(exc):
+            _err_console.print(
+                "[yellow]Hint:[/yellow] your token may lack write access. "
+                "Run [bold]ai-sync init[/bold] to update it."
+            )
         raise typer.Exit(code=1) from exc
 
     if result.committed:
